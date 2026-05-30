@@ -1,0 +1,22 @@
+[package]
+name = "aether-cli"
+version = "0.1.0"
+edition = "2021"
+authors = ["Aether Team"]
+license = "MIT"
+description = "Aether CLI companion for remote terminal operations"
+
+[[bin]]
+name = "aether"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+dirs = "6"
+toml = "0.8"
+russh = "0.50.0-beta.7"
+russh-keys = "0.50.0-beta.7"

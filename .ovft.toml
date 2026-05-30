@@ -1,0 +1,23 @@
+verbose = false
+
+source_dirs = ["src-tauri/src", "crates", "src"]
+spec_dirs = ["docs/requirements"]
+source_patterns = ["*.rs", "*.ts", "*.tsx"]
+exclude_patterns = [
+    "target/**",
+    "node_modules/**",
+    "dist/**",
+    ".git/**",
+]
+
+artifact_types = [
+    "feat",
+    "req",
+    "arch",
+    "dsn",
+    "impl",
+    "utest",
+    "itest",
+]
+
+output_dir = "target"
