@@ -1,7 +1,14 @@
 // [impl->feat~tauri-desktop-shell~1]
 // [impl->dsn~state-sync~1]
 import { invoke } from "@tauri-apps/api/core";
-import type { ConnectionProfile, RemoteFile, HistoryEntry } from "./types";
+import type {
+  ConnectionProfile,
+  RemoteFile,
+  HistoryEntry,
+  FileAssociation,
+  CommandHistoryEntry,
+  HotkeyConfig,
+} from "./types";
 
 // [impl->feat~connection-profiles~1]
 export async function listProfiles(): Promise<ConnectionProfile[]> {
@@ -68,6 +75,25 @@ export async function writeFile(
   return invoke("write_file", { sessionId, path, data });
 }
 
+export async function downloadFile(
+  sessionId: string,
+  remotePath: string,
+  localPath: string,
+): Promise<void> {
+  return invoke("download_file", { sessionId, remotePath, localPath });
+}
+
+export async function downloadFileToTemp(
+  sessionId: string,
+  remotePath: string,
+): Promise<string> {
+  return invoke("download_file_to_temp", { sessionId, remotePath });
+}
+
+export async function readLocalFile(path: string): Promise<number[]> {
+  return invoke("read_local_file", { path });
+}
+
 // [impl->feat~file-association-tool-mapping~1]
 export async function openRemoteFile(
   sessionId: string,
@@ -90,4 +116,42 @@ export async function saveLogDialog(
   defaultName: string,
 ): Promise<void> {
   return invoke("save_log_dialog", { data, defaultName });
+}
+
+// [impl->feat~file-association-tool-mapping~1]
+// [impl->req~tool-mapping-config~1]
+export async function listFileAssociations(): Promise<FileAssociation[]> {
+  return invoke("list_file_associations");
+}
+
+export async function saveFileAssociation(
+  association: FileAssociation,
+): Promise<void> {
+  return invoke("save_file_association", { association });
+}
+
+export async function deleteFileAssociation(extension: string): Promise<void> {
+  return invoke("delete_file_association", { extension });
+}
+
+// [impl->feat~cross-session-command-history~1]
+// [impl->req~command-history-configurable-hotkeys~1]
+export async function listCommandHistory(): Promise<CommandHistoryEntry[]> {
+  return invoke("list_command_history");
+}
+
+export async function addCommandHistory(command: string): Promise<void> {
+  return invoke("add_command_history", { command });
+}
+
+export async function clearCommandHistory(): Promise<void> {
+  return invoke("clear_command_history");
+}
+
+export async function getHotkeyConfig(): Promise<HotkeyConfig> {
+  return invoke("get_hotkey_config");
+}
+
+export async function saveHotkeyConfig(config: HotkeyConfig): Promise<void> {
+  return invoke("save_hotkey_config", { config });
 }

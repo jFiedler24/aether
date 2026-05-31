@@ -225,6 +225,9 @@ async fn ssh_io_loop(
         }
     }
 
+    // Notify frontend that the connection was closed (unexpected drop)
+    let _ = app.emit(&format!("ssh-disconnected-{}", session_id), ());
+
     // Graceful disconnect
     let _ = handle
         .disconnect(russh::Disconnect::ByApplication, "", "English")

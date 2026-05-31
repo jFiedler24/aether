@@ -445,6 +445,8 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({
           </>
         )}
       </div>
+
+      {/* Footer actions */}
     </aside>
   );
 };

@@ -3,9 +3,11 @@
 
 // [impl->feat~tauri-desktop-shell~1]
 // [impl->feat~windows-primary-target~1]
+mod command_history;
 mod history;
 mod profiles;
 mod remote_edit;
+mod settings;
 mod sftp;
 mod ssh;
 mod terminal;
@@ -23,6 +25,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         // [impl->req~windows-webview-clipboard~1]
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_drag::init())
         // [impl->feat~connection-profiles~1]
         .invoke_handler(tauri::generate_handler![
             history::list_history,
@@ -38,12 +41,27 @@ fn main() {
             sftp::list_directory,
             sftp::read_file,
             sftp::write_file,
+            sftp::download_file,
+            sftp::download_file_to_temp,
+            sftp::read_local_file,
             // [impl->feat~file-association-tool-mapping~1]
             remote_edit::open_remote_file,
             remote_edit::unwatch_remote_file,
             remote_edit::list_watched_files,
             // [impl->req~terminal-log-save~1]
             terminal::save_log_dialog,
+            // [impl->feat~file-association-tool-mapping~1]
+            // [impl->req~tool-mapping-config~1]
+            settings::list_file_associations,
+            settings::save_file_association,
+            settings::delete_file_association,
+            // [impl->feat~cross-session-command-history~1]
+            // [impl->req~command-history-configurable-hotkeys~1]
+            settings::get_hotkey_config,
+            settings::save_hotkey_config,
+            command_history::list_command_history,
+            command_history::add_command_history,
+            command_history::clear_command_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

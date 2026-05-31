@@ -72,6 +72,47 @@ pub async fn read_file(session_id: String, path: String) -> Result<Vec<u8>, Stri
 // [impl->feat~sftp-file-transfer~1]
 // [impl->req~large-file-transfer-native~1]
 #[command]
+pub async fn download_file(
+    session_id: String,
+    remote_path: String,
+    local_path: String,
+) -> Result<(), String> {
+    let data = read_file(session_id, remote_path).await?;
+    std::fs::write(&local_path, &data).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Downloads a remote file to the OS temp directory and returns the local temp path.
+/// Used for native drag-out operations.
+#[command]
+pub async fn download_file_to_temp(
+    session_id: String,
+    remote_path: String,
+) -> Result<String, String> {
+    let data = read_file(session_id, remote_path.clone()).await?;
+    let file_name = std::path::Path::new(&remote_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("download");
+    let temp_dir = std::env::temp_dir().join("aether");
+    std::fs::create_dir_all(&temp_dir).map_err(|e| e.to_string())?;
+    let local_path = temp_dir.join(file_name);
+    std::fs::write(&local_path, &data).map_err(|e| e.to_string())?;
+    Ok(local_path.to_string_lossy().into_owned())
+}
+
+/// Read a local file from disk and return its bytes.
+/// Used for OS file-drop uploads where the webview cannot access paths directly.
+#[command]
+pub async fn read_local_file(path: String) -> Result<Vec<u8>, String> {
+    tokio::fs::read(&path)
+        .await
+        .map_err(|e| format!("Read local file failed: {e}"))
+}
+
+// [impl->feat~sftp-file-transfer~1]
+// [impl->req~large-file-transfer-native~1]
+#[command]
 pub async fn write_file(session_id: String, path: String, data: Vec<u8>) -> Result<(), String> {
     let sftp = ssh::get_sftp_session(&session_id)
         .ok_or_else(|| format!("Session {session_id} not found"))?;

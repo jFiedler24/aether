@@ -5,6 +5,9 @@ import type { Session, RemoteFile } from "../types";
 
 vi.mock("../tauri", () => ({
   listDirectory: vi.fn(),
+  listFileAssociations: vi.fn(() => Promise.resolve([])),
+  openRemoteFile: vi.fn(() => Promise.resolve("/tmp/test")),
+  listWatchedFiles: vi.fn(() => Promise.resolve([])),
 }));
 
 import { listDirectory } from "../tauri";

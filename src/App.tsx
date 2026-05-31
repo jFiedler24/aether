@@ -19,6 +19,7 @@ import TerminalPanel, {
 import FileBrowser from "./components/FileBrowser";
 // [impl->feat~connection-profiles~1]
 import ConnectionModal from "./components/ConnectionModal";
+import SettingsModal from "./components/SettingsModal";
 import * as tauri from "./tauri";
 import type { ConnectionProfile, Session } from "./types";
 
@@ -28,6 +29,7 @@ function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [showConnectionModal, setShowConnectionModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [editingProfile, setEditingProfile] = useState<
     ConnectionProfile | undefined
   >(undefined);
@@ -93,6 +95,49 @@ function App() {
     },
     [activeSessionId],
   );
+
+  // [impl->req~graceful-reconnect~1]
+  const handleReconnect = useCallback(async (session: Session) => {
+    // Clean up old session on backend
+    try {
+      await tauri.disconnect(session.id);
+    } catch {
+      // ignore
+    }
+    terminalRefs.current.delete(session.id);
+
+    // Remove old session from UI
+    setSessions((prev) => prev.filter((s) => s.id !== session.id));
+
+    // Create new connecting session with same profile
+    const tempSession: Session = {
+      id: crypto.randomUUID(),
+      profile: session.profile,
+      status: "connecting",
+    };
+    setSessions((prev) => [...prev, tempSession]);
+    setActiveSessionId(tempSession.id);
+
+    try {
+      const sessionId = await tauri.connect(session.profile);
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === tempSession.id
+            ? { ...s, id: sessionId, status: "connected" as const }
+            : s,
+        ),
+      );
+      setActiveSessionId(sessionId);
+    } catch (e) {
+      setSessions((prev) =>
+        prev.map((s) =>
+          s.id === tempSession.id
+            ? { ...s, status: "error" as const, error: String(e) }
+            : s,
+        ),
+      );
+    }
+  }, []);
 
   // [impl->feat~connection-profiles~1]
   useEffect(() => {
@@ -245,6 +290,9 @@ function App() {
             session={activeSession}
             collapsed={terminalCollapsed}
             onToggleCollapse={toggleTerminal}
+            onOpenSettings={() => setShowSettingsModal(true)}
+            onReconnect={handleReconnect}
+            onCloseSession={handleCloseSession}
           />
         </Panel>
       </PanelGroup>
@@ -258,6 +306,10 @@ function App() {
           }}
           initialProfile={editingProfile}
         />
+      )}
+
+      {showSettingsModal && (
+        <SettingsModal onClose={() => setShowSettingsModal(false)} />
       )}
     </div>
   );

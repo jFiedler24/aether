@@ -13,6 +13,8 @@ vi.mock("@xterm/xterm", () => ({
     this.loadAddon = vi.fn();
     this.onData = vi.fn();
     this.onResize = vi.fn();
+    this.attachCustomKeyEventHandler = vi.fn();
+    this.paste = vi.fn();
     this.cols = 80;
     this.rows = 24;
     this.options = {};
@@ -46,6 +48,9 @@ const defaultProps = {
   session: mockSession,
   collapsed: false,
   onToggleCollapse: vi.fn(),
+  onOpenSettings: vi.fn(),
+  onReconnect: vi.fn(),
+  onCloseSession: vi.fn(),
 };
 
 describe("TerminalPanel", () => {
@@ -78,7 +83,21 @@ describe("TerminalPanel", () => {
     };
     render(<TerminalPanel {...defaultProps} session={errorSession} />);
     expect(screen.getByText("Connection failed:")).toBeInTheDocument();
-    expect(screen.getByText("Connection refused")).toBeInTheDocument();
+    expect(
+      screen.getAllByText("Connection refused").length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it("shows disconnected overlay with reconnect button when session is in error state", () => {
+    const errorSession: Session = {
+      ...mockSession,
+      status: "error",
+      error: "Connection closed by remote host",
+    };
+    render(<TerminalPanel {...defaultProps} session={errorSession} />);
+    expect(screen.getByText("Connection lost")).toBeInTheDocument();
+    expect(screen.getByText("Reconnect")).toBeInTheDocument();
+    expect(screen.getByText("Close")).toBeInTheDocument();
   });
 
   it("creates a terminal instance on mount", () => {

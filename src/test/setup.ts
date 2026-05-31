@@ -12,6 +12,11 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn(() => Promise.resolve(() => {})),
 }));
 
+// Mock Tauri dialog plugin
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: vi.fn(() => Promise.resolve(null)),
+}));
+
 // Mock xterm — use vi.fn(impl) so the constructor itself is a trackable spy
 vi.mock("@xterm/xterm", () => ({
   Terminal: vi.fn(function (this: any) {

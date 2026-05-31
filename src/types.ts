@@ -44,3 +44,22 @@ export interface HistoryEntry {
   password?: string;
   privateKeyPath?: string;
 }
+
+// [impl->feat~file-association-tool-mapping~1]
+// [impl->req~tool-mapping-config~1]
+export interface FileAssociation {
+  extension: string;
+  toolPath: string;
+}
+
+// [impl->feat~cross-session-command-history~1]
+// [impl->req~command-history-configurable-hotkeys~1]
+export interface CommandHistoryEntry {
+  command: string;
+  timestamp: string;
+}
+
+export interface HotkeyConfig {
+  previousCommand: string;
+  nextCommand: string;
+}

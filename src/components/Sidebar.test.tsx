@@ -25,6 +25,7 @@ const defaultProps = {
   onActivateSession: vi.fn(),
   onCloseSession: vi.fn(),
   onNewConnection: vi.fn(),
+  onOpenSettings: vi.fn(),
   collapsed: false,
   onExpand: vi.fn(),
 };

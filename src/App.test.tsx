@@ -19,6 +19,19 @@ vi.mock("./tauri", () => ({
   unwatchRemoteFile: vi.fn(() => Promise.resolve()),
   listWatchedFiles: vi.fn(() => Promise.resolve([])),
   saveLogDialog: vi.fn(() => Promise.resolve()),
+  listFileAssociations: vi.fn(() => Promise.resolve([])),
+  saveFileAssociation: vi.fn(() => Promise.resolve()),
+  deleteFileAssociation: vi.fn(() => Promise.resolve()),
+  listCommandHistory: vi.fn(() => Promise.resolve([])),
+  addCommandHistory: vi.fn(() => Promise.resolve()),
+  clearCommandHistory: vi.fn(() => Promise.resolve()),
+  getHotkeyConfig: vi.fn(() =>
+    Promise.resolve({
+      previousCommand: "Shift+ArrowUp",
+      nextCommand: "Shift+ArrowDown",
+    }),
+  ),
+  saveHotkeyConfig: vi.fn(() => Promise.resolve()),
 }));
 
 // Mock resize observer

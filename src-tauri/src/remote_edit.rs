@@ -1,3 +1,4 @@
+use crate::settings;
 use crate::sftp;
 use crate::ssh;
 use std::collections::HashMap;
@@ -23,16 +24,26 @@ fn temp_dir_for(session_id: &str) -> PathBuf {
         .join(session_id)
 }
 
-/// Download a remote file to a local temp path, open it with the default
-/// application, and start a background watcher that syncs changes back.
+/// Spawn a command and return an error if it exits with a non-zero status.
+fn run_and_check(cmd: &mut std::process::Command) -> std::io::Result<()> {
+    let status = cmd.spawn()?.wait()?;
+    if !status.success() {
+        let code = status.code().unwrap_or(-1);
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("process exited with code {code}"),
+        ));
+    }
+    Ok(())
+}
+
+/// Download a remote file to a local temp path, open it with the configured
+/// tool (or default application), and start a background watcher that syncs
+/// changes back.
 // [impl->feat~file-association-tool-mapping~1]
 // [impl->req~temp-download-on-open~1]
 #[command]
-pub async fn open_remote_file(
-    session_id: String,
-    remote_path: String,
-    _window: tauri::Window,
-) -> Result<String, String> {
+pub async fn open_remote_file(session_id: String, remote_path: String) -> Result<String, String> {
     // Verify session exists
     let _session =
         ssh::get_session(&session_id).ok_or_else(|| format!("Session {session_id} not found"))?;
@@ -48,13 +59,53 @@ pub async fn open_remote_file(
 
     let local_path_str = local_path.to_string_lossy().to_string();
 
-    // Open with default application
-    open_with_default(&local_path_str).map_err(|e| e.to_string())?;
+    // Determine file extension and look up association
+    let remote_path_buf = PathBuf::from(&remote_path);
+    let ext = remote_path_buf
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("");
+
+    if let Some(tool) = settings::get_tool_for_extension(ext) {
+        if let Err(tool_err) = open_with_tool(&local_path_str, &tool) {
+            // Configured tool failed — fall back to the OS default opener
+            open_with_default(&local_path_str).map_err(|default_err| {
+                format!(
+                    "Configured tool '{tool}' failed: {tool_err}. \
+                     Default opener also failed: {default_err}"
+                )
+            })?;
+        }
+    } else {
+        open_with_default(&local_path_str)
+            .map_err(|e| format!("Failed to open file with default application: {e}"))?;
+    }
 
     // Start background watcher
     start_watcher(session_id, local_path_str.clone(), remote_path).await?;
 
     Ok(local_path_str)
+}
+
+/// Open a file with a specific tool/application.
+#[cfg(target_os = "macos")]
+fn open_with_tool(path: &str, tool: &str) -> std::io::Result<()> {
+    run_and_check(
+        std::process::Command::new("open")
+            .arg("-a")
+            .arg(tool)
+            .arg(path),
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn open_with_tool(path: &str, tool: &str) -> std::io::Result<()> {
+    run_and_check(std::process::Command::new(tool).arg(path))
+}
+
+#[cfg(target_os = "windows")]
+fn open_with_tool(path: &str, tool: &str) -> std::io::Result<()> {
+    run_and_check(std::process::Command::new("cmd").args(["/C", "start", "", tool, path]))
 }
 
 /// Stop watching a file for changes.
@@ -104,29 +155,17 @@ async fn start_watcher(
 
 #[cfg(target_os = "macos")]
 fn open_with_default(path: &str) -> std::io::Result<()> {
-    std::process::Command::new("open")
-        .arg(path)
-        .spawn()?
-        .wait()?;
-    Ok(())
+    run_and_check(std::process::Command::new("open").arg(path))
 }
 
 #[cfg(target_os = "linux")]
 fn open_with_default(path: &str) -> std::io::Result<()> {
-    std::process::Command::new("xdg-open")
-        .arg(path)
-        .spawn()?
-        .wait()?;
-    Ok(())
+    run_and_check(std::process::Command::new("xdg-open").arg(path))
 }
 
 #[cfg(target_os = "windows")]
 fn open_with_default(path: &str) -> std::io::Result<()> {
-    std::process::Command::new("cmd")
-        .args(["/C", "start", "", path])
-        .spawn()?
-        .wait()?;
-    Ok(())
+    run_and_check(std::process::Command::new("cmd").args(["/C", "start", "", path]))
 }
 
 async fn watch_loop(session_id: String, local_path: String, remote_path: String) {
