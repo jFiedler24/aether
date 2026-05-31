@@ -24,7 +24,9 @@ describe("ConnectionModal", () => {
 
   it("renders new connection form", () => {
     render(<ConnectionModal onConnect={onConnect} onClose={onClose} />);
-    expect(screen.getByRole("heading", { name: /New Connection/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /New Connection/i }),
+    ).toBeInTheDocument();
     expect(screen.getByPlaceholderText("My Server")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("192.168.1.1")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("root")).toBeInTheDocument();
@@ -36,9 +38,11 @@ describe("ConnectionModal", () => {
         onConnect={onConnect}
         onClose={onClose}
         initialProfile={mockProfile}
-      />
+      />,
     );
-    expect(screen.getByRole("heading", { name: /Edit Connection/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: /Edit Connection/i }),
+    ).toBeInTheDocument();
     expect(screen.getByDisplayValue("Test Server")).toBeInTheDocument();
     expect(screen.getByDisplayValue("192.168.1.1")).toBeInTheDocument();
     expect(screen.getByDisplayValue("root")).toBeInTheDocument();
@@ -84,12 +88,20 @@ describe("ConnectionModal", () => {
 
     // Switch to key
     fireEvent.click(screen.getByText("SSH Key"));
-    expect(screen.getByPlaceholderText("~/.ssh/id_rsa")).toBeInTheDocument();
-    expect(screen.queryByPlaceholderText("Enter password")).not.toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText(/~\/\.ssh\/id_rsa/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText("Enter password"),
+    ).not.toBeInTheDocument();
 
     // Switch to agent
     fireEvent.click(screen.getByText("Agent"));
-    expect(screen.queryByPlaceholderText("Enter password")).not.toBeInTheDocument();
-    expect(screen.queryByPlaceholderText("~/.ssh/id_rsa")).not.toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText("Enter password"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByPlaceholderText(/~\/\.ssh\/id_rsa/i),
+    ).not.toBeInTheDocument();
   });
 });

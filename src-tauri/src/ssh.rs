@@ -1,5 +1,6 @@
 use crate::profiles::Profile;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 use tauri::command;
@@ -66,6 +67,35 @@ impl std::fmt::Debug for SessionState {
 static SESSIONS: LazyLock<Mutex<HashMap<String, SessionState>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Expand `~` to the user's home directory.
+fn expand_tilde(path: &str) -> PathBuf {
+    if let Some(stripped) = path.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(stripped);
+        }
+    }
+    PathBuf::from(path)
+}
+
+/// Detect a default SSH private key in the user's `.ssh` directory.
+/// On Windows, checks `%USERPROFILE%\.ssh\`; on Unix, checks `~/.ssh/`.
+/// Prefers ed25519, then rsa, then ecdsa.
+// [impl->req~windows-openssh-detection~1]
+fn detect_default_ssh_key() -> Option<PathBuf> {
+    let ssh_dir = dirs::home_dir()?.join(".ssh");
+    if !ssh_dir.is_dir() {
+        return None;
+    }
+    let candidates = ["id_ed25519", "id_rsa", "id_ecdsa"];
+    for name in &candidates {
+        let path = ssh_dir.join(name);
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    None
+}
+
 // [impl->feat~ssh-terminal~1]
 // [impl->arch~backend-rust-async~1]
 // [impl~req~async-commands-no-block~1]
@@ -98,12 +128,17 @@ pub async fn connect(profile: Profile, app: tauri::AppHandle) -> Result<String, 
                 .map_err(|e| format!("Auth error: {e}"))?
         }
         "key" => {
-            let key_path = profile
-                .private_key_path
-                .as_ref()
-                .ok_or("Private key path not provided")?;
-            let key = russh::keys::load_secret_key(key_path, None)
-                .map_err(|e| format!("Key load error: {e}"))?;
+            // [impl->req~windows-openssh-detection~1]
+            // If no key path is given, try to auto-detect a default SSH key.
+            let key_path = match profile.private_key_path.as_ref() {
+                Some(p) if !p.is_empty() => expand_tilde(p),
+                _ => detect_default_ssh_key()
+                    .ok_or("No private key path provided and no default SSH key found. \
+                           Please specify a key path or ensure a default key exists \
+                           (e.g. ~/.ssh/id_ed25519 on Unix or %USERPROFILE%\\.ssh\\id_ed25519 on Windows).")?,
+            };
+            let key = russh::keys::load_secret_key(&key_path, None)
+                .map_err(|e| format!("Key load error for '{}': {e}", key_path.display()))?;
             let key_with_hash = russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key), None);
             handle
                 .authenticate_publickey(profile.username.clone(), key_with_hash)
@@ -111,7 +146,11 @@ pub async fn connect(profile: Profile, app: tauri::AppHandle) -> Result<String, 
                 .map_err(|e| format!("Auth error: {e}"))?
         }
         "agent" => {
-            return Err("SSH agent authentication not yet implemented".to_string());
+            // [impl->req~windows-ssh-agent~1]
+            return Err("SSH agent authentication is not yet implemented. \
+                       On Windows, please use a private key file instead, \
+                       or ensure your key is in a default location for auto-detection."
+                .to_string());
         }
         _ => return Err(format!("Unknown auth type: {}", profile.auth_type)),
     };

@@ -532,8 +532,7 @@ const ConnectionModal: React.FC<ConnectionModalProps> = ({
                       type="text"
                       value={keyPath}
                       onChange={(e) => setKeyPath(e.target.value)}
-                      placeholder="~/.ssh/id_rsa"
-                      required
+                      placeholder="~/.ssh/id_rsa (optional — auto-detected if empty)"
                       style={{
                         flex: 1,
                         background: "transparent",
@@ -555,6 +554,17 @@ const ConnectionModal: React.FC<ConnectionModalProps> = ({
                     Browse
                   </button>
                 </div>
+                <span
+                  style={{
+                    fontSize: "0.75rem",
+                    color: "var(--text-muted)",
+                    marginTop: 2,
+                  }}
+                >
+                  {/* [impl->req~windows-openssh-detection~1] */}
+                  Leave empty to auto-detect default keys (~/.ssh/id_ed25519,
+                  id_rsa, etc.)
+                </span>
               </div>
             )}
 
