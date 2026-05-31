@@ -96,6 +96,8 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path release
           Get-ChildItem -Recurse target/release/bundle/
+          # Portable executable (no installer)
+          Copy-Item target/release/aether.exe release/Aether_${{ github.ref_name }}_x64-portable.exe
           if (Test-Path target/release/bundle/msi/*.msi) {
             Copy-Item target/release/bundle/msi/*.msi release/
           }

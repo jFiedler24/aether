@@ -93,5 +93,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: aether-windows
-          path: target/release/bundle/**
+          path: |
+            target/release/bundle/**
+            target/release/aether.exe
           if-no-files-found: warn
