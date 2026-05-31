@@ -242,6 +242,7 @@ function App() {
           collapsedSize={4}
           onCollapse={onConnectionsCollapse}
           onExpand={onConnectionsExpand}
+          style={{ height: "100%", overflow: "hidden" }}
         >
           <Sidebar
             sessions={sessions}
@@ -265,6 +266,7 @@ function App() {
           collapsedSize={4}
           onCollapse={onFilesCollapse}
           onExpand={onFilesExpand}
+          style={{ height: "100%", overflow: "hidden" }}
         >
           <FileBrowser
             session={activeSession}
@@ -284,6 +286,7 @@ function App() {
           collapsedSize={4}
           onCollapse={onTerminalCollapse}
           onExpand={onTerminalExpand}
+          style={{ height: "100%", overflow: "hidden" }}
         >
           <TerminalPanel
             ref={terminalRefCallback}

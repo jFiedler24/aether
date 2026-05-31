@@ -1159,40 +1159,64 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         {/* Drag overlay */}
         {isDraggingOver && (
           <div
+            className="drag-pulse"
             style={{
               position: "absolute",
               inset: 0,
-              backgroundColor: "rgba(99, 102, 241, 0.12)",
-              border: "2px dashed var(--accent)",
-              borderRadius: 8,
-              margin: 8,
+              backgroundColor: "rgba(99, 102, 241, 0.15)",
+              border: "3px dashed var(--accent)",
+              borderRadius: 12,
+              margin: 6,
               display: "flex",
               flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
-              gap: 12,
+              gap: 16,
               zIndex: 50,
-              backdropFilter: "blur(2px)",
+              backdropFilter: "blur(3px)",
             }}
           >
-            <Upload size={36} style={{ color: "var(--accent)" }} />
-            <span
+            <div
+              className="drag-bounce"
               style={{
-                fontSize: "0.9375rem",
-                fontWeight: 600,
-                color: "var(--accent)",
+                width: 72,
+                height: 72,
+                borderRadius: "50%",
+                backgroundColor: "rgba(99, 102, 241, 0.2)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                border: "2px solid var(--accent)",
               }}
             >
-              Drop files to upload
-            </span>
-            <span
+              <Upload size={36} style={{ color: "var(--accent)" }} />
+            </div>
+            <div
               style={{
-                fontSize: "0.75rem",
-                color: "var(--text-muted)",
+                textAlign: "center",
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
               }}
             >
-              to {path}
-            </span>
+              <span
+                style={{
+                  fontSize: "1.0625rem",
+                  fontWeight: 700,
+                  color: "var(--accent)",
+                }}
+              >
+                Drop files to upload
+              </span>
+              <span
+                style={{
+                  fontSize: "0.8125rem",
+                  color: "var(--text-secondary)",
+                }}
+              >
+                Release to upload to {path}
+              </span>
+            </div>
           </div>
         )}
       </div>
@@ -1202,11 +1226,12 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
         <div
           style={{
             borderTop: "1px solid var(--border-color)",
+            borderLeft: `3px solid ${progress.type === "upload" ? "var(--accent)" : "#22c55e"}`,
             backgroundColor: "var(--bg-tertiary)",
-            padding: "10px 14px",
+            padding: "12px 14px",
             display: "flex",
             flexDirection: "column",
-            gap: 6,
+            gap: 8,
             flexShrink: 0,
           }}
         >
@@ -1304,20 +1329,26 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
           <div
             style={{
               width: "100%",
-              height: 4,
+              height: 6,
               backgroundColor: "var(--bg-hover)",
-              borderRadius: 2,
+              borderRadius: 3,
               overflow: "hidden",
             }}
           >
             <div
+              className={progress.phase === "reading" ? "progress-pulse" : ""}
               style={{
                 width: `${percent}%`,
                 height: "100%",
                 backgroundColor:
                   progress.type === "upload" ? "var(--accent)" : "#22c55e",
-                borderRadius: 2,
+                borderRadius: 3,
                 transition: "width 0.15s ease",
+                backgroundImage:
+                  progress.phase === "reading"
+                    ? "linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.25) 50%, transparent 100%)"
+                    : undefined,
+                backgroundSize: "200% 100%",
               }}
             />
           </div>

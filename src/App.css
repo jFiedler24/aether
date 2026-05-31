@@ -204,6 +204,50 @@
     }
 }
 
+@keyframes drag-pulse {
+    0%,
+    100% {
+        opacity: 0.08;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.22;
+        transform: scale(1.02);
+    }
+}
+
+@keyframes drag-bounce {
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+    50% {
+        transform: translateY(-6px);
+    }
+}
+
+@keyframes progress-pulse {
+    0%,
+    100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.6;
+    }
+}
+
 .spin {
     animation: spin 1s linear infinite;
+}
+
+.drag-pulse {
+    animation: drag-pulse 2s ease-in-out infinite;
+}
+
+.drag-bounce {
+    animation: drag-bounce 1.5s ease-in-out infinite;
+}
+
+.progress-pulse {
+    animation: progress-pulse 1.2s ease-in-out infinite;
 }
