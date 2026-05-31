@@ -77,20 +77,21 @@ jobs:
       - name: Build Tauri app
         run: npx tauri build ${{ matrix.args }}
 
+      - name: List bundle directory
+        run: find src-tauri/target/release/bundle -type f || true
+
       - name: Upload macOS artifacts
         if: matrix.platform == 'macos-latest'
         uses: actions/upload-artifact@v4
         with:
           name: aether-macos
-          path: |
-            src-tauri/target/release/bundle/dmg/*.dmg
-            src-tauri/target/release/bundle/macos/*.app
+          path: src-tauri/target/release/bundle/**
+          if-no-files-found: warn
 
       - name: Upload Windows artifacts
         if: matrix.platform == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
           name: aether-windows
-          path: |
-            src-tauri/target/release/bundle/**/*.exe
-            src-tauri/target/release/bundle/**/*.msi
+          path: src-tauri/target/release/bundle/**
+          if-no-files-found: warn
