@@ -191,6 +191,11 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({
           <IconButton onClick={onExpand} title="Collapse connections">
             <ChevronLeft size={18} />
           </IconButton>
+          <img
+            src="/icon.svg"
+            alt="Aether"
+            style={{ width: 20, height: 20, flexShrink: 0 }}
+          />
           <span
             style={{
               fontSize: "0.9375rem",

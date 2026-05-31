@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- Deep Terminal Background Gradient -->
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0F172A" /> <!-- Dark Slate -->
+      <stop offset="100%" stop-color="#020617" /> <!-- Near Black -->
+    </linearGradient>
+
+    <!-- Glowing Accent Gradient for the 'A' Base -->
+    <linearGradient id="glow" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38BDF8" /> <!-- Light Blue -->
+      <stop offset="100%" stop-color="#818CF8" /> <!-- Indigo -->
+    </linearGradient>
+
+    <!-- Terminal Phosphor Green Glow for the CLI Prompt -->
+    <filter id="termGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="0" stdDeviation="12" flood-color="#4ADE80" flood-opacity="0.8"/>
+    </filter>
+
+    <!-- Drop Shadow for Depth -->
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.6"/>
+    </filter>
+  </defs>
+
+  <!-- App Icon Base Shape -->
+  <rect width="1024" height="1024" rx="225" fill="url(#bg)" />
+
+  <!-- The Ethereal 'A' Structure -->
+  <path d="M512 360 L280 820 L400 820 L512 580 L624 820 L744 820 Z" fill="url(#glow)" filter="url(#shadow)"/>
+
+  <!-- Crossbar -->
+  <rect x="410" y="660" width="204" height="64" rx="16" fill="url(#glow)" filter="url(#shadow)"/>
+
+  <!-- The Umlaut (Ä) reimagined as a Terminal Command Line ">_" -->
+  <!-- The ">" Prompt (Replaces Left Dot) -->
+  <path d="M 412 170 L 472 210 L 412 250" fill="none" stroke="#4ADE80" stroke-width="32" stroke-linecap="square" stroke-linejoin="miter" filter="url(#termGlow)"/>
+
+  <!-- The "_" Blinking Cursor (Replaces Right Dot) -->
+  <rect x="522" y="218" width="90" height="32" fill="#4ADE80" filter="url(#termGlow)"/>
+</svg>
