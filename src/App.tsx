@@ -22,6 +22,7 @@ import ConnectionModal from "./components/ConnectionModal";
 import SettingsModal from "./components/SettingsModal";
 import * as tauri from "./tauri";
 import type { ConnectionProfile, Session } from "./types";
+import "./App.css";
 
 // [impl->feat~remote-terminal-app~1]
 function App() {
@@ -58,7 +59,7 @@ function App() {
 
     try {
       // [impl->arch~backend-rust-async~1]
-      const sessionId = await tauri.connect(profile);
+      const sessionId = await tauri.connect(tempSession.id, profile);
       setSessions((prev) =>
         prev.map((s) =>
           s.id === tempSession.id
@@ -119,7 +120,7 @@ function App() {
     setActiveSessionId(tempSession.id);
 
     try {
-      const sessionId = await tauri.connect(session.profile);
+      const sessionId = await tauri.connect(tempSession.id, session.profile);
       setSessions((prev) =>
         prev.map((s) =>
           s.id === tempSession.id

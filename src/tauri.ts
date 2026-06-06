@@ -34,8 +34,11 @@ export async function clearHistory(): Promise<void> {
 }
 
 // [impl->feat~ssh-terminal~1]
-export async function connect(profile: ConnectionProfile): Promise<string> {
-  return invoke("connect", { profile });
+export async function connect(
+  sessionId: string,
+  profile: ConnectionProfile,
+): Promise<string> {
+  return invoke("connect", { sessionId, profile });
 }
 
 export async function disconnect(sessionId: string): Promise<void> {

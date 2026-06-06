@@ -2,14 +2,34 @@ import "@testing-library/jest-dom";
 import { cleanup } from "@testing-library/react";
 import { afterEach, vi } from "vitest";
 
+// Global store for event callbacks so tests can simulate backend events
+const eventCallbacks: Record<string, ((event: any) => void)[]> = {};
+
+export function emitTauriEvent(eventName: string, payload: any) {
+  (eventCallbacks[eventName] || []).forEach((cb) => cb({ payload }));
+}
+
+export function clearTauriEvents() {
+  Object.keys(eventCallbacks).forEach((k) => delete eventCallbacks[k]);
+}
+
 // Mock Tauri invoke globally
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }));
 
-// Mock Tauri event API
+// Mock Tauri event API — stores callbacks so tests can emit events
 vi.mock("@tauri-apps/api/event", () => ({
-  listen: vi.fn(() => Promise.resolve(() => {})),
+  listen: vi.fn((eventName: string, callback: (event: any) => void) => {
+    if (!eventCallbacks[eventName]) {
+      eventCallbacks[eventName] = [];
+    }
+    eventCallbacks[eventName].push(callback);
+    return Promise.resolve(() => {
+      const idx = eventCallbacks[eventName].indexOf(callback);
+      if (idx > -1) eventCallbacks[eventName].splice(idx, 1);
+    });
+  }),
 }));
 
 // Mock Tauri dialog plugin
@@ -28,6 +48,7 @@ vi.mock("@xterm/xterm", () => ({
     this.loadAddon = vi.fn();
     this.onData = vi.fn();
     this.onResize = vi.fn();
+    this.refresh = vi.fn();
     this.cols = 80;
     this.rows = 24;
     this.options = {};
@@ -44,4 +65,5 @@ vi.mock("@xterm/addon-fit", () => ({
 // Clean up after each test
 afterEach(() => {
   cleanup();
+  clearTauriEvents();
 });

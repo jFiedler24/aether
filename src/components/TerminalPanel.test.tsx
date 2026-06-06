@@ -1,32 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, waitFor, act } from "@testing-library/react";
 import TerminalPanel from "./TerminalPanel";
 import type { Session } from "../types";
-
-vi.mock("@xterm/xterm", () => ({
-  Terminal: vi.fn(function (this: any) {
-    this.open = vi.fn();
-    this.write = vi.fn();
-    this.writeln = vi.fn();
-    this.clear = vi.fn();
-    this.dispose = vi.fn();
-    this.loadAddon = vi.fn();
-    this.onData = vi.fn();
-    this.onResize = vi.fn();
-    this.attachCustomKeyEventHandler = vi.fn();
-    this.paste = vi.fn();
-    this.cols = 80;
-    this.rows = 24;
-    this.options = {};
-  }),
-}));
-
-vi.mock("@xterm/addon-fit", () => ({
-  FitAddon: vi.fn(function (this: any) {
-    this.fit = vi.fn();
-    this.proposeDimensions = vi.fn(() => ({ cols: 80, rows: 24 }));
-  }),
-}));
+import { emitTauriEvent } from "../test/setup";
 
 import { Terminal } from "@xterm/xterm";
 
@@ -56,6 +32,28 @@ const defaultProps = {
 describe("TerminalPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Give the terminal container non-zero dimensions so xterm.js is created
+    // immediately instead of deferred.
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+      configurable: true,
+      value: 800,
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      value: 600,
+    });
+  });
+
+  afterEach(() => {
+    // Clean up the prototype overrides so they don't leak to other test files
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+      configurable: true,
+      value: 0,
+    });
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
+      configurable: true,
+      value: 0,
+    });
   });
 
   it("renders the session name in the tab bar", () => {
@@ -65,7 +63,6 @@ describe("TerminalPanel", () => {
 
   it("shows the buffer size indicator", () => {
     render(<TerminalPanel {...defaultProps} />);
-    // Welcome banner adds bytes to the buffer, so it's not 0 B
     expect(screen.getByText(/\/ 5 MB/)).toBeInTheDocument();
   });
 
@@ -103,5 +100,34 @@ describe("TerminalPanel", () => {
   it("creates a terminal instance on mount", () => {
     render(<TerminalPanel {...defaultProps} />);
     expect(Terminal).toHaveBeenCalled();
+  });
+
+  it("writes incoming SSH data to the terminal", async () => {
+    render(<TerminalPanel {...defaultProps} />);
+
+    // Simulate backend sending prompt bytes
+    const promptBytes = new TextEncoder().encode("pi@raspberrypi:~$ ");
+    emitTauriEvent("ssh-data-session-1", Array.from(promptBytes));
+
+    await waitFor(() => {
+      const terminalInstance = (Terminal as any).mock.results[0].value;
+      expect(terminalInstance.write).toHaveBeenCalledWith("pi@raspberrypi:~$ ");
+    });
+  });
+
+  it("shows a no-data hint when connected but nothing received after 2s", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<TerminalPanel {...defaultProps} />);
+
+    // Fast-forward 2.5 seconds inside act so React processes the state update
+    act(() => {
+      vi.advanceTimersByTime(2500);
+    });
+
+    expect(
+      screen.getByText(/Waiting for remote host data/i),
+    ).toBeInTheDocument();
+
+    vi.useRealTimers();
   });
 });

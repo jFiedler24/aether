@@ -77,6 +77,18 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(
     const [commandHistory, setCommandHistory] = useState<CommandHistoryEntry[]>(
       [],
     );
+    const [hasReceivedData, setHasReceivedData] = useState(false);
+    const [showNoDataHint, setShowNoDataHint] = useState(false);
+    const [showDebug, setShowDebug] = useState(false);
+    const [debugEvents, setDebugEvents] = useState<string[]>([]);
+
+    const logDebug = useCallback((msg: string) => {
+      console.log(`[aether terminal] ${msg}`);
+      setDebugEvents((prev) => {
+        const next = [...prev, `${new Date().toLocaleTimeString()}: ${msg}`];
+        return next.slice(-20);
+      });
+    }, []);
 
     // Ref to always access current session without stale closures
     const sessionRef = useRef(session);
@@ -85,13 +97,17 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(
     // Reset log buffer whenever the session identity changes so old
     // session data does not bleed into a new one.
     const lastSessionIdRef = useRef<string | undefined>(undefined);
-    if (session?.id !== lastSessionIdRef.current) {
-      lastSessionIdRef.current = session?.id;
-      logChunksRef.current = [];
-      logByteCountRef.current = 0;
-      setLogBytes(0);
-      setActiveTab("terminal");
-    }
+    useEffect(() => {
+      if (session?.id !== lastSessionIdRef.current) {
+        lastSessionIdRef.current = session?.id;
+        logChunksRef.current = [];
+        logByteCountRef.current = 0;
+        setLogBytes(0);
+        setActiveTab("terminal");
+        setHasReceivedData(false);
+        setShowNoDataHint(false);
+      }
+    }, [session?.id]);
 
     // [impl->feat~cross-session-command-history~1]
     const inputBufferRef = useRef("");
@@ -216,166 +232,226 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(
         current: undefined as UnlistenFn | undefined,
       };
 
-      // [impl->req~terminal-emulation~1]
-      const terminal = new Terminal({
-        cursorBlink: true,
-        fontFamily: 'Menlo, Monaco, "Courier New", monospace',
-        fontSize: 13,
-        theme: {
-          background: "#0f1117",
-          foreground: "#e2e4ea",
-          cursor: "#6366f1",
-          selectionBackground: "#2d3042",
-          black: "#0f1117",
-          red: "#ef4444",
-          green: "#22c55e",
-          yellow: "#f59e0b",
-          blue: "#6366f1",
-          magenta: "#a855f7",
-          cyan: "#06b6d4",
-          white: "#e2e4ea",
-          brightBlack: "#5a5e6e",
-          brightRed: "#f87171",
-          brightGreen: "#4ade80",
-          brightYellow: "#fbbf24",
-          brightBlue: "#8184f8",
-          brightMagenta: "#c084fc",
-          brightCyan: "#22d3ee",
-          brightWhite: "#f1f5f9",
-        },
-        scrollback: 10000,
-      });
+      let terminal: Terminal | null = null;
+      let fitAddon: FitAddon | null = null;
 
-      // [impl->req~xterm-fit-on-resize~1]
-      const fitAddon = new FitAddon();
-      terminal.loadAddon(fitAddon);
-
-      terminal.open(containerRef.current);
-      fitAddon.fit();
-
-      // [impl->feat~ssh-terminal~1]
-      // Send keystrokes to the SSH backend as raw bytes.
-      // Use sessionRef to avoid stale closure.
-      // Also track the current input line for command history.
-      terminal.onData((data) => {
-        if (sessionRef.current?.status !== "connected") return;
-        const bytes = Array.from(data).map((c) => c.charCodeAt(0) & 0xff);
-        sendData(sessionRef.current.id, bytes).catch(() => {});
-
-        // [impl->feat~cross-session-command-history~1]
-        // Track input for history — handles escape sequences, Unicode, and control chars.
-        let escState: "none" | "esc" | "csi" = "none";
-        for (const char of data) {
-          const code = char.charCodeAt(0);
-
-          // Escape sequence state machine
-          if (escState === "csi") {
-            if (code >= 0x40 && code <= 0x7e) {
-              escState = "none";
-            }
-            continue;
-          }
-          if (escState === "esc") {
-            if (char === "[") {
-              escState = "csi";
-            } else {
-              escState = "none";
-            }
-            continue;
-          }
-          if (code === 0x1b) {
-            escState = "esc";
-            continue;
-          }
-
-          if (char === "\r" || char === "\n") {
-            const cmd = inputBufferRef.current.trim();
-            if (cmd) {
-              tauri.addCommandHistory(cmd).catch(() => {});
-              window.dispatchEvent(new CustomEvent("aether-history-changed"));
-            }
-            inputBufferRef.current = "";
-          } else if (char === "\x7f" || char === "\x08") {
-            inputBufferRef.current = inputBufferRef.current.slice(0, -1);
-          } else if (char === "\x03" || char === "\x04") {
-            inputBufferRef.current = "";
-          } else if (code < 0x20 || code === 0x7f) {
-            // Skip other control characters
-          } else {
-            inputBufferRef.current += char;
-          }
+      const createTerminal = () => {
+        if (!mounted || !containerRef.current || terminalRef.current) return;
+        const w = containerRef.current.clientWidth;
+        const h = containerRef.current.clientHeight;
+        if (w === 0 || h === 0) {
+          logDebug(`deferring terminal creation — container still ${w}x${h}`);
+          return;
         }
-      });
 
-      // Listen for SSH data from the backend.
-      // Store unlisten in a ref so cleanup always works even if setup is still pending.
-      const setupListener = async () => {
-        const unlisten = await listen<number[]>(
-          `ssh-data-${session.id}`,
-          (event) => {
-            if (!mounted) return;
-            const bytes = new Uint8Array(event.payload);
-            const text = new TextDecoder().decode(bytes);
-            terminal.write(text);
-            appendToBuffer(text);
-          },
+        logDebug(
+          `creating terminal for session ${session.id}, container size: ${w}x${h}`,
         );
-        if (mounted) {
-          unlistenRef.current = unlisten;
-        } else {
-          unlisten();
-        }
-      };
-      setupListener();
 
-      // Listen for unexpected disconnection from the backend
-      const setupDisconnectListener = async () => {
-        const unlisten = await listen(`ssh-disconnected-${session.id}`, () => {
-          if (!mounted) return;
-          terminal.writeln(
-            "\r\n\x1b[1;31mConnection closed by remote host.\x1b[0m",
-          );
+        // [impl->req~terminal-emulation~1]
+        terminal = new Terminal({
+          cursorBlink: true,
+          fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+          fontSize: 13,
+          theme: {
+            background: "#0f1117",
+            foreground: "#e2e4ea",
+            cursor: "#6366f1",
+            selectionBackground: "#2d3042",
+            black: "#0f1117",
+            red: "#ef4444",
+            green: "#22c55e",
+            yellow: "#f59e0b",
+            blue: "#6366f1",
+            magenta: "#a855f7",
+            cyan: "#06b6d4",
+            white: "#e2e4ea",
+            brightBlack: "#5a5e6e",
+            brightRed: "#f87171",
+            brightGreen: "#4ade80",
+            brightYellow: "#fbbf24",
+            brightBlue: "#8184f8",
+            brightMagenta: "#c084fc",
+            brightCyan: "#22d3ee",
+            brightWhite: "#f1f5f9",
+          },
+          scrollback: 10000,
         });
-        if (mounted) {
-          disconnectUnlistenRef.current = unlisten;
-        } else {
-          unlisten();
-        }
+
+        // [impl->req~xterm-fit-on-resize~1]
+        fitAddon = new FitAddon();
+        terminal.loadAddon(fitAddon);
+
+        terminal.open(containerRef.current);
+        fitAddon.fit();
+
+        // [impl->feat~ssh-terminal~1]
+        // Send keystrokes to the SSH backend as raw bytes.
+        // Use sessionRef to avoid stale closure.
+        // Also track the current input line for command history.
+        terminal.onData((data) => {
+          if (sessionRef.current?.status !== "connected") return;
+          const bytes = Array.from(data).map((c) => c.charCodeAt(0) & 0xff);
+          sendData(sessionRef.current.id, bytes).catch(() => {});
+
+          // [impl->feat~cross-session-command-history~1]
+          // Track input for history — handles escape sequences, Unicode, and control chars.
+          let escState: "none" | "esc" | "csi" = "none";
+          for (const char of data) {
+            const code = char.charCodeAt(0);
+
+            // Escape sequence state machine
+            if (escState === "csi") {
+              if (code >= 0x40 && code <= 0x7e) {
+                escState = "none";
+              }
+              continue;
+            }
+            if (escState === "esc") {
+              if (char === "[") {
+                escState = "csi";
+              } else {
+                escState = "none";
+              }
+              continue;
+            }
+            if (code === 0x1b) {
+              escState = "esc";
+              continue;
+            }
+
+            if (char === "\r" || char === "\n") {
+              const cmd = inputBufferRef.current.trim();
+              if (cmd) {
+                tauri.addCommandHistory(cmd).catch(() => {});
+                window.dispatchEvent(new CustomEvent("aether-history-changed"));
+              }
+              inputBufferRef.current = "";
+            } else if (char === "\x7f" || char === "\x08") {
+              inputBufferRef.current = inputBufferRef.current.slice(0, -1);
+            } else if (char === "\x03" || char === "\x04") {
+              inputBufferRef.current = "";
+            } else if (code < 0x20 || code === 0x7f) {
+              // Skip other control characters
+            } else {
+              inputBufferRef.current += char;
+            }
+          }
+        });
+
+        // Listen for SSH data from the backend.
+        const setupListener = async () => {
+          logDebug(`registering listener ssh-data-${session.id}`);
+          const unlisten = await listen<number[]>(
+            `ssh-data-${session.id}`,
+            (event) => {
+              if (!mounted || !terminal) return;
+              logDebug(
+                `received ssh-data event, payload length: ${event.payload?.length ?? 0}`,
+              );
+              setHasReceivedData(true);
+              const bytes = new Uint8Array(event.payload);
+              const text = new TextDecoder().decode(bytes);
+              logDebug(
+                `decoded text length: ${text.length}, first 50 chars: "${text.slice(0, 50).replace(/\r?\n/g, "\\n")}"`,
+              );
+              terminal.write(text);
+              appendToBuffer(text);
+            },
+          );
+          logDebug(`listener registered for ssh-data-${session.id}`);
+          if (mounted) {
+            unlistenRef.current = unlisten;
+          } else {
+            unlisten();
+          }
+        };
+        setupListener();
+
+        // Listen for unexpected disconnection from the backend
+        const setupDisconnectListener = async () => {
+          logDebug(`registering listener ssh-disconnected-${session.id}`);
+          const unlisten = await listen(
+            `ssh-disconnected-${session.id}`,
+            () => {
+              if (!mounted || !terminal) return;
+              logDebug(`received ssh-disconnected event`);
+              terminal.writeln(
+                "\r\n\x1b[1;31mConnection closed by remote host.\x1b[0m",
+              );
+            },
+          );
+          logDebug(`listener registered for ssh-disconnected-${session.id}`);
+          if (mounted) {
+            disconnectUnlistenRef.current = unlisten;
+          } else {
+            unlisten();
+          }
+        };
+        setupDisconnectListener();
+
+        // Write welcome banner
+        const welcomeLines = [
+          `\x1b[1;34mWelcome to Aether Terminal\x1b[0m`,
+          `Session: \x1b[1m${session.profile.name}\x1b[0m`,
+          `Host: \x1b[36m${session.profile.host}:${session.profile.port}\x1b[0m`,
+          // [impl->req~profile-fields~1]
+          // Username displayed exactly as entered (case-sensitive).
+          `User: \x1b[33m${session.profile.username}\x1b[0m`,
+          ``,
+          `\x1b[90mConnecting...\x1b[0m`,
+        ];
+        welcomeLines.forEach((line) => {
+          terminal!.writeln(line);
+          appendToBuffer(line + "\r\n");
+        });
+
+        terminalRef.current = terminal;
+        fitAddonRef.current = fitAddon;
       };
-      setupDisconnectListener();
 
-      // Write welcome banner every time this effect runs (i.e. when session.id changes)
-      const welcomeLines = [
-        `\x1b[1;34mWelcome to Aether Terminal\x1b[0m`,
-        `Session: \x1b[1m${session.profile.name}\x1b[0m`,
-        `Host: \x1b[36m${session.profile.host}:${session.profile.port}\x1b[0m`,
-        // [impl->req~profile-fields~1]
-        // Username displayed exactly as entered (case-sensitive).
-        `User: \x1b[33m${session.profile.username}\x1b[0m`,
-        ``,
-        `\x1b[90mConnecting...\x1b[0m`,
-      ];
-      welcomeLines.forEach((line) => {
-        terminal.writeln(line);
-        appendToBuffer(line + "\r\n");
-      });
+      // Attempt immediate creation; defer if container has zero dimensions.
+      createTerminal();
 
-      terminalRef.current = terminal;
-      fitAddonRef.current = fitAddon;
+      // Watch container size changes (e.g. from react-resizable-panels).
+      // If the terminal hasn't been created yet (zero-dim startup), create it
+      // as soon as the container gets real dimensions.
+      const resizeObserver =
+        typeof ResizeObserver !== "undefined"
+          ? new ResizeObserver((entries) => {
+              if (!mounted) return;
+              const { width, height } = entries[0].contentRect;
+              logDebug(
+                `ResizeObserver: container ${width.toFixed(0)}x${height.toFixed(0)}`,
+              );
+              if (!terminalRef.current) {
+                createTerminal();
+              } else if (fitAddonRef.current) {
+                fitAddonRef.current.fit();
+                const t = terminalRef.current;
+                if (t.rows > 0 && typeof t.refresh === "function") {
+                  t.refresh(0, t.rows - 1);
+                }
+              }
+            })
+          : null;
+      resizeObserver?.observe(containerRef.current);
 
       // [impl->req~xterm-fit-on-resize~1]
-      const handleResize = () => {
-        fitAddon.fit();
+      const handleWindowResize = () => {
+        if (fitAddonRef.current) {
+          fitAddonRef.current.fit();
+        }
       };
-
-      window.addEventListener("resize", handleResize);
+      window.addEventListener("resize", handleWindowResize);
 
       return () => {
         mounted = false;
         unlistenRef.current?.();
         disconnectUnlistenRef.current?.();
-        window.removeEventListener("resize", handleResize);
-        terminal.dispose();
+        window.removeEventListener("resize", handleWindowResize);
+        resizeObserver?.disconnect();
+        terminalRef.current?.dispose();
         terminalRef.current = null;
         fitAddonRef.current = null;
       };
@@ -389,10 +465,33 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(
         fitAddonRef.current
       ) {
         // Small delay to let the DOM update
-        const id = setTimeout(() => fitAddonRef.current?.fit(), 50);
+        const id = setTimeout(() => {
+          fitAddonRef.current?.fit();
+          const t = terminalRef.current;
+          if (t && t.rows > 0) {
+            t.refresh(0, t.rows - 1);
+          }
+        }, 50);
         return () => clearTimeout(id);
       }
     }, [activeTab]);
+
+    // Show "Connected" status when session moves from connecting -> connected
+    useEffect(() => {
+      if (session?.status === "connected" && terminalRef.current) {
+        terminalRef.current.writeln("\r\n\x1b[1;32mConnected.\x1b[0m");
+      }
+    }, [session?.status]);
+
+    // Show a no-data hint if nothing arrives after 2 seconds
+    useEffect(() => {
+      if (session?.status !== "connected" || hasReceivedData) {
+        setShowNoDataHint(false);
+        return;
+      }
+      const id = setTimeout(() => setShowNoDataHint(true), 2000);
+      return () => clearTimeout(id);
+    }, [session?.status, hasReceivedData]);
 
     const formatBytes = (bytes: number) => {
       if (bytes < 1024) return `${bytes} B`;
@@ -611,6 +710,35 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(
 
           <div style={{ flex: 1 }} />
 
+          <button
+            type="button"
+            onClick={() => setShowDebug((p) => !p)}
+            title="Toggle debug log"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+              padding: "4px 8px",
+              backgroundColor: "transparent",
+              border: "1px solid var(--border-color)",
+              borderRadius: 4,
+              color: "var(--text-muted)",
+              fontSize: "0.75rem",
+              cursor: "pointer",
+              transition: "all 0.15s ease",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = "var(--bg-hover)";
+              e.currentTarget.style.color = "var(--text-primary)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = "transparent";
+              e.currentTarget.style.color = "var(--text-muted)";
+            }}
+          >
+            Debug
+          </button>
+
           <IconButton onClick={onOpenSettings} title="Settings">
             <Settings size={16} />
           </IconButton>
@@ -707,6 +835,31 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(
           </div>
         )}
 
+        {/* Debug log panel */}
+        {showDebug && (
+          <div
+            style={{
+              maxHeight: 120,
+              overflowY: "auto",
+              backgroundColor: "#000",
+              borderBottom: "1px solid var(--border-color)",
+              fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+              fontSize: "0.6875rem",
+              color: "#0f0",
+              padding: "4px 8px",
+            }}
+          >
+            {debugEvents.length === 0 && (
+              <div style={{ color: "var(--text-muted)" }}>No events yet…</div>
+            )}
+            {debugEvents.map((ev, i) => (
+              <div key={i} style={{ whiteSpace: "nowrap" }}>
+                {ev}
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Terminal content area */}
         <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
           {/* Terminal container - always mounted so xterm.js stays alive; hidden when History is active */}
@@ -720,6 +873,41 @@ const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(
               display: activeTab === "terminal" ? "block" : "none",
             }}
           />
+
+          {/* No-data hint */}
+          {showNoDataHint && activeTab === "terminal" && !isDisconnected && (
+            <div
+              style={{
+                position: "absolute",
+                inset: 0,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                zIndex: 10,
+                pointerEvents: "none",
+              }}
+            >
+              <span
+                style={{
+                  fontSize: "0.875rem",
+                  color: "var(--text-muted)",
+                }}
+              >
+                Waiting for remote host data…
+              </span>
+              <span
+                style={{
+                  fontSize: "0.75rem",
+                  color: "var(--text-muted)",
+                }}
+              >
+                If this persists, the shell may have exited or PTY allocation
+                failed.
+              </span>
+            </div>
+          )}
 
           {/* Disconnected overlay */}
           {isDisconnected && activeTab === "terminal" && (

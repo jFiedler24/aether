@@ -101,9 +101,11 @@ fn detect_default_ssh_key() -> Option<PathBuf> {
 // [impl~req~async-commands-no-block~1]
 // [impl->req~shared-connection-lifecycle~1]
 #[command]
-pub async fn connect(profile: Profile, app: tauri::AppHandle) -> Result<String, String> {
-    let session_id = uuid::Uuid::new_v4().to_string();
-
+pub async fn connect(
+    session_id: String,
+    profile: Profile,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
     let config = Arc::new(russh::client::Config {
         inactivity_timeout: Some(Duration::from_secs(30)),
         ..Default::default()
@@ -169,18 +171,9 @@ pub async fn connect(profile: Profile, app: tauri::AppHandle) -> Result<String, 
         .await
         .map_err(|e| format!("Channel open failed: {e}"))?;
 
-    // Request PTY (default 80×24, TODO: forward actual xterm size)
-    channel
-        .request_pty(false, "xterm-256color", 80, 24, 0, 0, &[])
-        .await
-        .map_err(|e| format!("PTY request failed: {e}"))?;
-
-    channel
-        .request_shell(true)
-        .await
-        .map_err(|e| format!("Shell request failed: {e}"))?;
-
-    // Open SFTP subsystem on a second channel
+    // Open SFTP subsystem on a second channel BEFORE starting the shell,
+    // so the I/O loop can be spawned immediately after the shell request
+    // and no initial shell output is lost during SFTP handshake.
     // [impl->feat~remote-file-browser~1]
     let sftp_session = {
         let sftp_channel = handle
@@ -196,10 +189,26 @@ pub async fn connect(profile: Profile, app: tauri::AppHandle) -> Result<String, 
             .map_err(|e| format!("SFTP session init failed: {e}"))?
     };
 
+    // Request PTY (default 80×24, TODO: forward actual xterm size)
+    println!("[aether ssh] Requesting PTY for session {}", session_id);
+    channel
+        .request_pty(true, "xterm-256color", 80, 24, 0, 0, &[])
+        .await
+        .map_err(|e| format!("PTY request failed: {e}"))?;
+    println!("[aether ssh] PTY requested for session {}", session_id);
+
+    println!("[aether ssh] Requesting shell for session {}", session_id);
+    channel
+        .request_shell(true)
+        .await
+        .map_err(|e| format!("Shell request failed: {e}"))?;
+    println!("[aether ssh] Shell requested for session {}", session_id);
+
     // Create communication channel for frontend → SSH
     let (tx, rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
-    // Spawn I/O loop
+    // Spawn I/O loop immediately after shell request so no prompt data is lost
+    println!("[aether ssh] Spawning I/O loop for session {}", session_id);
     let app_clone = app.clone();
     let session_id_clone = session_id.clone();
     let task_handle = tokio::spawn(ssh_io_loop(
@@ -209,6 +218,7 @@ pub async fn connect(profile: Profile, app: tauri::AppHandle) -> Result<String, 
         session_id_clone,
         rx,
     ));
+    println!("[aether ssh] I/O loop spawned for session {}", session_id);
 
     {
         let mut sessions = SESSIONS
@@ -227,6 +237,10 @@ pub async fn connect(profile: Profile, app: tauri::AppHandle) -> Result<String, 
         );
     }
 
+    println!(
+        "[aether ssh] connect() returning Ok for session {}",
+        session_id
+    );
     Ok(session_id)
 }
 
@@ -237,10 +251,21 @@ async fn ssh_io_loop(
     session_id: String,
     mut rx: mpsc::UnboundedReceiver<Vec<u8>>,
 ) {
+    println!("[aether ssh] I/O loop starting for session {}", session_id);
+    // Give the frontend a moment to set up its event listener before
+    // we start forwarding data, so the initial prompt isn't lost.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    println!(
+        "[aether ssh] I/O loop entering select for session {}",
+        session_id
+    );
+
     loop {
         tokio::select! {
             Some(data) = rx.recv() => {
+                println!("[aether ssh] rx recv {} bytes for session {}", data.len(), session_id);
                 if channel.data(&data[..]).await.is_err() {
+                    println!("[aether ssh] channel.data() failed, breaking loop for session {}", session_id);
                     break;
                 }
             }
@@ -248,24 +273,54 @@ async fn ssh_io_loop(
                 match msg {
                     russh::ChannelMsg::Data { data } => {
                         let bytes: Vec<u8> = data.to_vec();
-                        let _ = app.emit(&format!("ssh-data-{}", session_id), bytes);
+                        println!("[aether ssh] ChannelMsg::Data {} bytes for session {}", bytes.len(), session_id);
+                        if let Err(e) = app.emit(&format!("ssh-data-{}", session_id), bytes.clone()) {
+                            println!("[aether ssh] emit error for session {}: {}", session_id, e);
+                        } else {
+                            println!("[aether ssh] emitted ssh-data-{} with {} bytes", session_id, bytes.len());
+                        }
                     }
                     russh::ChannelMsg::ExtendedData { data, .. } => {
                         let bytes: Vec<u8> = data.to_vec();
-                        let _ = app.emit(&format!("ssh-data-{}", session_id), bytes);
+                        println!("[aether ssh] ChannelMsg::ExtendedData {} bytes for session {}", bytes.len(), session_id);
+                        if let Err(e) = app.emit(&format!("ssh-data-{}", session_id), bytes.clone()) {
+                            println!("[aether ssh] emit error for session {}: {}", session_id, e);
+                        } else {
+                            println!("[aether ssh] emitted ssh-data-{} with {} bytes", session_id, bytes.len());
+                        }
                     }
-                    russh::ChannelMsg::ExitStatus { .. } => break,
-                    russh::ChannelMsg::Close => break,
-                    russh::ChannelMsg::Eof => break,
-                    _ => {}
+                    russh::ChannelMsg::ExitStatus { .. } => {
+                        println!("[aether ssh] ExitStatus for session {}, breaking loop", session_id);
+                        break;
+                    }
+                    russh::ChannelMsg::Close => {
+                        println!("[aether ssh] Close for session {}, breaking loop", session_id);
+                        break;
+                    }
+                    russh::ChannelMsg::Eof => {
+                        println!("[aether ssh] Eof for session {}, breaking loop", session_id);
+                        break;
+                    }
+                    other => {
+                        println!("[aether ssh] Other channel msg for session {}: {:?}", session_id, std::mem::discriminant(&other));
+                    }
                 }
             }
-            else => break,
+            else => {
+                println!("[aether ssh] select! else branch for session {}, breaking loop", session_id);
+                break;
+            }
         }
     }
 
+    println!("[aether ssh] I/O loop ended for session {}", session_id);
     // Notify frontend that the connection was closed (unexpected drop)
-    let _ = app.emit(&format!("ssh-disconnected-{}", session_id), ());
+    if let Err(e) = app.emit(&format!("ssh-disconnected-{}", session_id), ()) {
+        println!(
+            "[aether ssh] disconnect emit error for session {}: {}",
+            session_id, e
+        );
+    }
 
     // Graceful disconnect
     let _ = handle
