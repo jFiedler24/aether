@@ -1,3 +1,8 @@
+use aes_gcm::aead::Aead;
+use aes_gcm::KeyInit;
+use aes_gcm::{Aes256Gcm, Nonce};
+use base64::Engine;
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::command;
@@ -16,7 +21,7 @@ pub struct Profile {
     pub auth_type: String,
     pub private_key_path: Option<String>,
     // [impl->req~profile-fields~1]
-    // TODO: encrypt before persistence (Stronghold integration pending)
+    // Passwords are accepted at runtime but not persisted to disk.
     pub password: Option<String>,
     pub color: String,
 }
@@ -26,6 +31,26 @@ pub struct Profile {
 #[serde(rename_all = "camelCase")]
 struct ProfilesFile {
     profiles: Vec<Profile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredProfile {
+    id: String,
+    name: String,
+    host: String,
+    port: u16,
+    username: String,
+    auth_type: String,
+    private_key_path: Option<String>,
+    encrypted_password: Option<String>,
+    color: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredProfilesFile {
+    profiles: Vec<StoredProfile>,
 }
 
 fn config_dir() -> PathBuf {
@@ -38,13 +63,96 @@ fn profiles_path() -> PathBuf {
     config_dir().join("profiles.toml")
 }
 
+pub(crate) fn encrypt_password_for_storage(password: &str) -> Result<String, String> {
+    let key = crate::settings::get_or_create_encryption_key()?;
+    let cipher = Aes256Gcm::new_from_slice(&key)
+        .map_err(|e| format!("Invalid encryption key length: {e}"))?;
+
+    let mut nonce_bytes = [0u8; 12];
+    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+
+    let ciphertext = cipher
+        .encrypt(Nonce::from_slice(&nonce_bytes), password.as_bytes())
+        .map_err(|e| format!("Password encryption failed: {e}"))?;
+
+    let mut payload = nonce_bytes.to_vec();
+    payload.extend_from_slice(&ciphertext);
+    Ok(base64::engine::general_purpose::STANDARD.encode(payload))
+}
+
+pub(crate) fn decrypt_password_from_storage(encrypted: &str) -> Result<String, String> {
+    let key = crate::settings::get_or_create_encryption_key()?;
+    let cipher = Aes256Gcm::new_from_slice(&key)
+        .map_err(|e| format!("Invalid encryption key length: {e}"))?;
+
+    let payload = base64::engine::general_purpose::STANDARD
+        .decode(encrypted)
+        .map_err(|e| format!("Invalid encrypted password encoding: {e}"))?;
+    if payload.len() < 13 {
+        return Err("Encrypted password payload is too short".to_string());
+    }
+
+    let (nonce_bytes, ciphertext) = payload.split_at(12);
+    let plaintext = cipher
+        .decrypt(Nonce::from_slice(nonce_bytes), ciphertext)
+        .map_err(|e| format!("Password decryption failed: {e}"))?;
+
+    String::from_utf8(plaintext).map_err(|e| format!("Decrypted password is not UTF-8: {e}"))
+}
+
+fn stored_to_profile(stored: StoredProfile) -> Result<Profile, String> {
+    let password = match stored.encrypted_password {
+        Some(encrypted) => Some(decrypt_password_from_storage(&encrypted)?),
+        None => None,
+    };
+
+    Ok(Profile {
+        id: stored.id,
+        name: stored.name,
+        host: stored.host,
+        port: stored.port,
+        username: stored.username,
+        auth_type: stored.auth_type,
+        private_key_path: stored.private_key_path,
+        password,
+        color: stored.color,
+    })
+}
+
+fn profile_to_stored(profile: &Profile) -> Result<StoredProfile, String> {
+    let encrypted_password = match profile.password.as_deref() {
+        Some(password) if !password.is_empty() => Some(encrypt_password_for_storage(password)?),
+        _ => None,
+    };
+
+    Ok(StoredProfile {
+        id: profile.id.clone(),
+        name: profile.name.clone(),
+        host: profile.host.clone(),
+        port: profile.port,
+        username: profile.username.clone(),
+        auth_type: profile.auth_type.clone(),
+        private_key_path: profile.private_key_path.clone(),
+        encrypted_password,
+        color: profile.color.clone(),
+    })
+}
+
 fn read_profiles_file() -> Result<ProfilesFile, String> {
     let path = profiles_path();
     if !path.exists() {
         return Ok(ProfilesFile { profiles: vec![] });
     }
     let contents = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    // Try new wrapper format first, then fall back to raw array for compatibility.
+    // Try encrypted wrapper format first, then fall back to older plaintext formats.
+    if let Ok(file) = toml::from_str::<StoredProfilesFile>(&contents) {
+        let profiles = file
+            .profiles
+            .into_iter()
+            .map(stored_to_profile)
+            .collect::<Result<Vec<_>, _>>()?;
+        return Ok(ProfilesFile { profiles });
+    }
     if let Ok(file) = toml::from_str::<ProfilesFile>(&contents) {
         return Ok(file);
     }
@@ -57,9 +165,23 @@ fn read_profiles_file() -> Result<ProfilesFile, String> {
 fn write_profiles_file(file: &ProfilesFile) -> Result<(), String> {
     let path = profiles_path();
     std::fs::create_dir_all(config_dir()).map_err(|e| e.to_string())?;
-    let contents = toml::to_string_pretty(file).map_err(|e| e.to_string())?;
+    let stored_profiles = file
+        .profiles
+        .iter()
+        .map(profile_to_stored)
+        .collect::<Result<Vec<_>, _>>()?;
+    let stored = StoredProfilesFile {
+        profiles: stored_profiles,
+    };
+    let contents = toml::to_string_pretty(&stored).map_err(|e| e.to_string())?;
     std::fs::write(path, contents).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+pub(crate) fn sanitize_for_storage(profile: &Profile) -> Result<Profile, String> {
+    let stored = profile_to_stored(profile)?;
+    stored_to_profile(stored)
 }
 
 // [impl->arch~backend-rust-async~1]

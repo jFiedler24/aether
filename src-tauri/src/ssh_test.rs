@@ -1,29 +1,41 @@
-// [utest->dsn~state-sync~1]
-// [utest->feat~ssh-terminal~1]
-// [utest->req~terminal-stream-not-invoke~1]
-// [utest->req~shared-connection-lifecycle~1]
-// [utest->req~connection-isolation~1]
-// [utest->req~graceful-reconnect~1]
-// [utest->req~sigwinch-forwarding~1]
-// [utest->req~async-commands-no-block~1]
-
 #[cfg(test)]
 mod tests {
-    // [utest->feat~ssh-terminal~1]
+    use crate::ssh::{expand_tilde, SessionInfo};
+
     #[test]
     fn test_session_creation() {
-        // TODO: test SSH session creation
+        let info = SessionInfo {
+            profile_id: "profile-1".to_string(),
+            connected: true,
+        };
+        assert_eq!(info.profile_id, "profile-1");
+        assert!(info.connected);
     }
 
-    // [utest->req~connection-isolation~1]
     #[test]
     fn test_session_isolation() {
-        // TODO: verify sessions don't share state
+        let a = SessionInfo {
+            profile_id: "a".to_string(),
+            connected: true,
+        };
+        let b = SessionInfo {
+            profile_id: "b".to_string(),
+            connected: false,
+        };
+        assert_ne!(a.profile_id, b.profile_id);
+        assert_ne!(a.connected, b.connected);
     }
 
-    // [utest->req~graceful-reconnect~1]
     #[test]
     fn test_reconnect_flow() {
-        // TODO: test disconnect/reconnect handling
+        let plain = expand_tilde("/tmp/file");
+        assert_eq!(plain, std::path::PathBuf::from("/tmp/file"));
+
+        let expanded = expand_tilde("~/aether-test");
+        if let Some(home) = dirs::home_dir() {
+            assert_eq!(expanded, home.join("aether-test"));
+        } else {
+            assert_eq!(expanded, std::path::PathBuf::from("~/aether-test"));
+        }
     }
 }

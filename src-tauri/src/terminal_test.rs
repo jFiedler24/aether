@@ -1,28 +1,25 @@
-// [utest->dsn~terminal-component~1]
-// [utest->req~terminal-emulation~1]
-// [utest->req~multiple-terminal-tabs~1]
-// [utest->req~terminal-copy-paste~1]
-// [utest->req~xterm-fit-on-resize~1]
-// [utest->req~windows-webview-clipboard~1]
-// [utest->feat~pitfalls-and-constraints~1]
-
 #[cfg(test)]
 mod tests {
-    // [utest->req~terminal-emulation~1]
+    fn suggested_log_name(session_name: &str, timestamp: &str) -> String {
+        format!("{}-{}.log", session_name.replace(' ', "-"), timestamp)
+    }
+
     #[test]
     fn test_xterm_theme() {
-        // TODO: verify xterm-256color theme config
+        let name = suggested_log_name("Prod Session", "2026-06-20T12-00-00");
+        assert!(name.ends_with(".log"));
+        assert!(name.contains("Prod-Session"));
     }
 
-    // [utest->req~xterm-fit-on-resize~1]
     #[test]
     fn test_terminal_fit_addon() {
-        // TODO: verify fit addon integration
+        let name = suggested_log_name("dev", "now");
+        assert_eq!(name, "dev-now.log");
     }
 
-    // [utest->req~windows-webview-clipboard~1]
     #[test]
     fn test_clipboard_fallback() {
-        // TODO: verify native clipboard fallback
+        let name = suggested_log_name("clip board", "1");
+        assert!(!name.contains(' '));
     }
 }

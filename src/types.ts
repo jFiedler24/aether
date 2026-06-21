@@ -41,7 +41,6 @@ export interface HistoryEntry {
   authType: string;
   color: string;
   connectedAt: string;
-  password?: string;
   privateKeyPath?: string;
 }
 

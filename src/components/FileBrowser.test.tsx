@@ -2,15 +2,19 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import FileBrowser from "./FileBrowser";
 import type { Session, RemoteFile } from "../types";
+import { emitTauriEvent } from "../test/setup";
+import { listen } from "@tauri-apps/api/event";
 
 vi.mock("../tauri", () => ({
   listDirectory: vi.fn(),
   listFileAssociations: vi.fn(() => Promise.resolve([])),
   openRemoteFile: vi.fn(() => Promise.resolve("/tmp/test")),
   listWatchedFiles: vi.fn(() => Promise.resolve([])),
+  readLocalFile: vi.fn(),
+  writeFile: vi.fn(),
 }));
 
-import { listDirectory } from "../tauri";
+import { listDirectory, readLocalFile, writeFile } from "../tauri";
 
 const mockSession: Session = {
   id: "session-1",
@@ -94,5 +98,63 @@ describe("FileBrowser", () => {
     const connectingSession = { ...mockSession, status: "connecting" as const };
     render(<FileBrowser {...defaultProps} session={connectingSession} />);
     expect(listDirectory).not.toHaveBeenCalled();
+  });
+
+  it("uploads files when receiving tauri://drag-drop", async () => {
+    vi.mocked(listDirectory).mockResolvedValue(mockFiles);
+    vi.mocked(readLocalFile).mockResolvedValue([1, 2, 3]);
+    vi.mocked(writeFile).mockResolvedValue(undefined);
+
+    render(<FileBrowser {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(vi.mocked(listen)).toHaveBeenCalledWith(
+        "tauri://drag-drop",
+        expect.any(Function),
+      );
+    });
+
+    emitTauriEvent("tauri://drag-drop", {
+      paths: ["/tmp/upload.txt"],
+      position: { x: 1, y: 1 },
+    });
+
+    await waitFor(() => {
+      expect(readLocalFile).toHaveBeenCalledWith("/tmp/upload.txt");
+    });
+
+    await waitFor(() => {
+      expect(writeFile).toHaveBeenCalledWith(
+        "session-1",
+        "/home/root/upload.txt",
+        [1, 2, 3],
+      );
+    });
+  });
+
+  it("ignores tauri://drag-drop when session is not connected", async () => {
+    vi.mocked(listDirectory).mockResolvedValue(mockFiles);
+    vi.mocked(readLocalFile).mockResolvedValue([1, 2, 3]);
+    vi.mocked(writeFile).mockResolvedValue(undefined);
+
+    const connectingSession = { ...mockSession, status: "connecting" as const };
+    render(<FileBrowser {...defaultProps} session={connectingSession} />);
+
+    await waitFor(() => {
+      expect(vi.mocked(listen)).toHaveBeenCalledWith(
+        "tauri://drag-drop",
+        expect.any(Function),
+      );
+    });
+
+    emitTauriEvent("tauri://drag-drop", {
+      paths: ["/tmp/upload.txt"],
+      position: { x: 1, y: 1 },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(readLocalFile).not.toHaveBeenCalled();
+    expect(writeFile).not.toHaveBeenCalled();
   });
 });

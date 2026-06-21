@@ -13,12 +13,17 @@ use tokio::time::sleep;
 // [impl->req~tool-mapping-config~1]
 
 /// Tracks active file watchers so they can be cancelled.
-static WATCHERS: LazyLock<Mutex<HashMap<String, tokio::task::AbortHandle>>> =
+struct WatcherEntry {
+    session_id: String,
+    handle: tokio::task::AbortHandle,
+}
+
+static WATCHERS: LazyLock<Mutex<HashMap<String, WatcherEntry>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn temp_dir_for(session_id: &str) -> PathBuf {
     dirs::cache_dir()
-        .unwrap_or_else(|| std::env::temp_dir())
+        .unwrap_or_else(std::env::temp_dir)
         .join("aether")
         .join("remote-files")
         .join(session_id)
@@ -29,10 +34,9 @@ fn run_and_check(cmd: &mut std::process::Command) -> std::io::Result<()> {
     let status = cmd.spawn()?.wait()?;
     if !status.success() {
         let code = status.code().unwrap_or(-1);
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("process exited with code {code}"),
-        ));
+        return Err(std::io::Error::other(format!(
+            "process exited with code {code}"
+        )));
     }
     Ok(())
 }
@@ -45,8 +49,15 @@ fn run_and_check(cmd: &mut std::process::Command) -> std::io::Result<()> {
 #[command]
 pub async fn open_remote_file(session_id: String, remote_path: String) -> Result<String, String> {
     // Verify session exists
-    let _session =
+    let session =
         ssh::get_session(&session_id).ok_or_else(|| format!("Session {session_id} not found"))?;
+    if !session.connected {
+        return Err(format!("Session {session_id} is not connected"));
+    }
+    println!(
+        "[aether remote-edit] opening {} for profile {}",
+        remote_path, session.profile_id
+    );
 
     // Download file contents
     let data = sftp::read_file(session_id.clone(), remote_path.clone()).await?;
@@ -117,7 +128,7 @@ pub async fn unwatch_remote_file(local_path: String) -> Result<(), String> {
         .map_err(|e| e.to_string())?
         .remove(&local_path)
     {
-        handle.abort();
+        handle.handle.abort();
     }
     Ok(())
 }
@@ -127,6 +138,21 @@ pub async fn unwatch_remote_file(local_path: String) -> Result<(), String> {
 pub async fn list_watched_files() -> Result<Vec<String>, String> {
     let map = WATCHERS.lock().map_err(|e| e.to_string())?;
     Ok(map.keys().cloned().collect())
+}
+
+pub fn clear_watchers_for_session(session_id: &str) {
+    if let Ok(mut watchers) = WATCHERS.lock() {
+        let keys: Vec<String> = watchers
+            .iter()
+            .filter(|(_, entry)| entry.session_id == session_id)
+            .map(|(path, _)| path.clone())
+            .collect();
+        for key in keys {
+            if let Some(entry) = watchers.remove(&key) {
+                entry.handle.abort();
+            }
+        }
+    }
 }
 
 async fn start_watcher(
@@ -140,15 +166,22 @@ async fn start_watcher(
         .map_err(|e| e.to_string())?
         .remove(&local_path)
     {
-        old.abort();
+        old.handle.abort();
     }
 
-    let handle = tokio::spawn(watch_loop(session_id, local_path.clone(), remote_path));
+    let watcher_session_id = session_id.clone();
+    let handle = tokio::spawn(watch_loop(watcher_session_id, local_path.clone(), remote_path));
 
     WATCHERS
         .lock()
         .map_err(|e| e.to_string())?
-        .insert(local_path, handle.abort_handle());
+        .insert(
+            local_path,
+            WatcherEntry {
+                session_id,
+                handle: handle.abort_handle(),
+            },
+        );
 
     Ok(())
 }
@@ -199,7 +232,12 @@ async fn watch_loop(session_id: String, local_path: String, remote_path: String)
             };
 
             // Upload back to remote
-            let _ = sftp::write_file(session_id.clone(), remote_path.clone(), data).await;
+            if let Err(err) = sftp::write_file(session_id.clone(), remote_path.clone(), data).await {
+                eprintln!(
+                    "[aether remote-edit] sync upload failed for {} (session {}): {}",
+                    remote_path, session_id, err
+                );
+            }
         }
     }
 

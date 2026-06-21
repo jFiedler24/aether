@@ -16,7 +16,6 @@ pub struct HistoryEntry {
     pub auth_type: String,
     pub color: String,
     pub connected_at: String,
-    pub password: Option<String>,
     pub private_key_path: Option<String>,
 }
 
@@ -86,7 +85,6 @@ pub async fn add_history_entry(profile: &crate::profiles::Profile) -> Result<(),
         auth_type: profile.auth_type.clone(),
         color: profile.color.clone(),
         connected_at: Utc::now().to_rfc3339(),
-        password: profile.password.clone(),
         private_key_path: profile.private_key_path.clone(),
     };
     file.entries.insert(0, entry);

@@ -1,3 +1,5 @@
+use base64::Engine;
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::LazyLock;
@@ -50,6 +52,8 @@ struct SettingsFile {
     associations: Vec<FileAssociation>,
     #[serde(default)]
     hotkeys: HotkeyConfig,
+    #[serde(default)]
+    encryption_key: Option<String>,
 }
 
 fn config_dir() -> PathBuf {
@@ -82,6 +86,40 @@ fn write_settings_file(file: &SettingsFile) -> Result<(), String> {
 /// In-memory cache so remote_edit.rs can look up associations without disk IO.
 static ASSOCIATIONS_CACHE: LazyLock<Mutex<Vec<FileAssociation>>> =
     LazyLock::new(|| Mutex::new(vec![]));
+static ENCRYPTION_KEY_CACHE: LazyLock<Mutex<Option<Vec<u8>>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+pub(crate) fn get_or_create_encryption_key() -> Result<Vec<u8>, String> {
+    if let Some(cached) = ENCRYPTION_KEY_CACHE
+        .lock()
+        .map_err(|e| e.to_string())?
+        .as_ref()
+        .cloned()
+    {
+        return Ok(cached);
+    }
+
+    let mut file = read_settings_file()?;
+
+    if let Some(encoded) = &file.encryption_key {
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .map_err(|e| format!("Invalid encryption key encoding: {e}"))?;
+        if bytes.len() == 32 {
+            *ENCRYPTION_KEY_CACHE.lock().map_err(|e| e.to_string())? = Some(bytes.clone());
+            return Ok(bytes);
+        }
+    }
+
+    let mut key = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut key);
+    let key_vec = key.to_vec();
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&key_vec);
+    file.encryption_key = Some(encoded);
+    write_settings_file(&file)?;
+    *ENCRYPTION_KEY_CACHE.lock().map_err(|e| e.to_string())? = Some(key_vec.clone());
+    Ok(key_vec)
+}
 
 fn refresh_cache() -> Result<(), String> {
     let file = read_settings_file()?;

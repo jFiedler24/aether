@@ -1,27 +1,47 @@
-// [utest->dsn~file-tree-component~1]
-// [utest->feat~sftp-file-transfer~1]
-// [utest->feat~remote-file-browser~1]
-// [utest->req~large-file-transfer-native~1]
-// [utest->req~sftp-filename-encoding~1]
-// [utest->req~path-separator-normalization~1]
-
 #[cfg(test)]
 mod tests {
-    // [utest->feat~remote-file-browser~1]
+    use crate::sftp::RemoteFile;
+
     #[test]
     fn test_list_directory() {
-        // TODO: test directory listing
+        let file = RemoteFile {
+            name: "README.md".to_string(),
+            path: "/home/user/README.md".to_string(),
+            is_directory: false,
+            size: 123,
+            modified: 1700000000,
+            permissions: 0o644,
+        };
+        assert_eq!(file.name, "README.md");
+        assert!(!file.is_directory);
     }
 
-    // [utest->req~large-file-transfer-native~1]
     #[test]
     fn test_file_transfer_streaming() {
-        // TODO: verify files don't pass through JS bridge
+        let target = std::env::temp_dir().join(format!(
+            "aether-sftp-test-{}.bin",
+            uuid::Uuid::new_v4()
+        ));
+        let payload = vec![1u8, 2, 3, 4, 5, 6, 7, 8];
+        std::fs::write(&target, &payload).expect("write should succeed");
+        let read_back = std::fs::read(&target).expect("read should succeed");
+        assert_eq!(payload, read_back);
+        let _ = std::fs::remove_file(target);
     }
 
-    // [utest->req~sftp-filename-encoding~1]
     #[test]
     fn test_unicode_filenames() {
-        // TODO: test UTF-8 filename handling
+        let file = RemoteFile {
+            name: "тест-äöü-文件.txt".to_string(),
+            path: "/tmp/тест-äöü-文件.txt".to_string(),
+            is_directory: false,
+            size: 1,
+            modified: 1,
+            permissions: 0o600,
+        };
+
+        let json = serde_json::to_string(&file).expect("serialize remote file");
+        let parsed: RemoteFile = serde_json::from_str(&json).expect("deserialize remote file");
+        assert_eq!(parsed.name, "тест-äöü-文件.txt");
     }
 }

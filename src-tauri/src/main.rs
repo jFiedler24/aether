@@ -12,6 +12,17 @@ mod sftp;
 mod ssh;
 mod terminal;
 
+#[cfg(test)]
+mod layout_test;
+#[cfg(test)]
+mod profiles_test;
+#[cfg(test)]
+mod sftp_test;
+#[cfg(test)]
+mod ssh_test;
+#[cfg(test)]
+mod terminal_test;
+
 fn main() {
     // [impl->feat~tauri-desktop-shell~1]
     // [impl->feat~pitfalls-and-constraints~1]

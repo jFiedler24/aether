@@ -149,13 +149,8 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
   const [files, setFiles] = useState<RemoteFile[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Reset path/files when the active session changes so we don't show the wrong host's files.
+  // Track the previous session id so we can reset path/files after a session switch.
   const lastSessionIdRef = useRef<string | undefined>(undefined);
-  if (session?.id !== lastSessionIdRef.current) {
-    lastSessionIdRef.current = session?.id;
-    setPath("/home/" + (session?.profile.username ?? ""));
-    setFiles([]);
-  }
   const [contextMenu, setContextMenu] = useState<ContextMenuState>({
     visible: false,
     x: 0,
@@ -219,6 +214,14 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
   useEffect(() => {
     loadFiles(path);
   }, [path, loadFiles]);
+
+  useEffect(() => {
+    if (session?.id !== lastSessionIdRef.current) {
+      lastSessionIdRef.current = session?.id;
+      setPath("/home/" + (session?.profile.username ?? ""));
+      setFiles([]);
+    }
+  }, [session?.id, session?.profile.username]);
 
   // Load file associations once on mount
   useEffect(() => {
@@ -607,7 +610,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
 
         console.log("[FileBrowser] Uploading to:", remotePath);
         await tauri.writeFile(s.id, remotePath, bytes);
-        totalBytesRead += bytes.length;
         console.log("[FileBrowser] Uploaded:", fileName);
       } catch (err) {
         console.error(`[FileBrowser] Failed to upload ${fileName}:`, err);
@@ -683,7 +685,6 @@ const FileBrowser: React.FC<FileBrowserProps> = ({
           }));
 
           await tauri.writeFile(session.id, remotePath, fileBytes);
-          bytesTransferred += file.size;
         } catch (err) {
           console.error(`Failed to upload ${file.name}:`, err);
           alert(`Failed to upload ${file.name}: ${String(err)}`);

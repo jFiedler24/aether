@@ -3,6 +3,38 @@ use serde::{Deserialize, Serialize};
 use tauri::command;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+async fn copy_remote_file_to_local(
+    session_id: &str,
+    remote_path: &str,
+    local_path: &std::path::Path,
+) -> Result<(), String> {
+    let sftp = ssh::get_sftp_session(session_id)
+        .ok_or_else(|| format!("Session {session_id} not found"))?;
+    let sftp = sftp.lock().await;
+
+    let mut remote_file = sftp
+        .open(remote_path)
+        .await
+        .map_err(|e| format!("SFTP open failed: {e}"))?;
+
+    if let Some(parent) = local_path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    let mut local_file = tokio::fs::File::create(local_path)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    tokio::io::copy(&mut remote_file, &mut local_file)
+        .await
+        .map_err(|e| format!("SFTP stream copy failed: {e}"))?;
+
+    local_file.flush().await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 // [impl->req~sftp-filename-encoding~1]
 // [impl->req~path-separator-normalization~1]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,27 +109,30 @@ pub async fn download_file(
     remote_path: String,
     local_path: String,
 ) -> Result<(), String> {
-    let data = read_file(session_id, remote_path).await?;
-    std::fs::write(&local_path, &data).map_err(|e| e.to_string())?;
-    Ok(())
+    let local_path = std::path::PathBuf::from(local_path);
+    copy_remote_file_to_local(&session_id, &remote_path, &local_path).await
 }
 
 /// Downloads a remote file to the OS temp directory and returns the local temp path.
 /// Used for native drag-out operations.
+/// Creates a unique subdirectory per file to avoid collisions while preserving the original filename.
 #[command]
 pub async fn download_file_to_temp(
     session_id: String,
     remote_path: String,
 ) -> Result<String, String> {
-    let data = read_file(session_id, remote_path.clone()).await?;
     let file_name = std::path::Path::new(&remote_path)
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("download");
     let temp_dir = std::env::temp_dir().join("aether");
-    std::fs::create_dir_all(&temp_dir).map_err(|e| e.to_string())?;
-    let local_path = temp_dir.join(file_name);
-    std::fs::write(&local_path, &data).map_err(|e| e.to_string())?;
+    // Create a unique subdirectory for this file to avoid collisions
+    let unique_subdir = temp_dir.join(uuid::Uuid::new_v4().to_string());
+    tokio::fs::create_dir_all(&unique_subdir)
+        .await
+        .map_err(|e| format!("Failed to create temp directory: {e}"))?;
+    let local_path = unique_subdir.join(file_name);
+    copy_remote_file_to_local(&session_id, &remote_path, &local_path).await?;
     Ok(local_path.to_string_lossy().into_owned())
 }
 

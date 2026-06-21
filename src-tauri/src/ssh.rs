@@ -20,20 +20,39 @@ pub struct SessionInfo {
 // [impl->req~shared-connection-lifecycle~1]
 // [impl->req~async-commands-no-block~1]
 
-/// Custom SSH client handler that auto-accepts host keys.
+/// SSH client handler that validates server keys against known_hosts.
 // [impl->feat~standard-ssh-gateway~1]
-struct SshClient {}
+struct SshClient {
+    host: String,
+    port: u16,
+}
 
 impl russh::client::Handler for SshClient {
     type Error = russh::Error;
 
     // [impl->feat~standard-ssh-gateway~1]
-    // Auto-accept unknown host keys so users never need ssh-keyscan.
+    // Enforce known_hosts verification to prevent silent MITM acceptance.
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh::keys::ssh_key::PublicKey,
+        server_public_key: &russh::keys::ssh_key::PublicKey,
     ) -> Result<bool, Self::Error> {
-        Ok(true)
+        match russh::keys::check_known_hosts(&self.host, self.port, server_public_key) {
+            Ok(true) => Ok(true),
+            Ok(false) => {
+                eprintln!(
+                    "[aether ssh] unknown host key for {}:{}; add it to known_hosts before connecting",
+                    self.host, self.port
+                );
+                Ok(false)
+            }
+            Err(err) => {
+                eprintln!(
+                    "[aether ssh] known_hosts validation failed for {}:{}: {}",
+                    self.host, self.port, err
+                );
+                Ok(false)
+            }
+        }
     }
 }
 
@@ -68,7 +87,7 @@ static SESSIONS: LazyLock<Mutex<HashMap<String, SessionState>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Expand `~` to the user's home directory.
-fn expand_tilde(path: &str) -> PathBuf {
+pub(crate) fn expand_tilde(path: &str) -> PathBuf {
     if let Some(stripped) = path.strip_prefix("~/") {
         if let Some(home) = dirs::home_dir() {
             return home.join(stripped);
@@ -114,8 +133,15 @@ pub async fn connect(
     let addrs = (profile.host.as_str(), profile.port);
 
     // [impl->feat~standard-ssh-gateway~1]
-    // Connect and auto-accept host key — no manual ssh-keyscan needed.
-    let mut handle = russh::client::connect(config, addrs, SshClient {})
+    // Connect with strict known_hosts verification.
+    let mut handle = russh::client::connect(
+        config,
+        addrs,
+        SshClient {
+            host: profile.host.clone(),
+            port: profile.port,
+        },
+    )
         .await
         .map_err(|e| format!("SSH connection failed: {e}"))?;
 
@@ -332,6 +358,8 @@ async fn ssh_io_loop(
 // [impl->req~graceful-reconnect~1]
 #[command]
 pub async fn disconnect(session_id: String) -> Result<(), String> {
+    crate::remote_edit::clear_watchers_for_session(&session_id);
+
     let mut sessions = SESSIONS
         .lock()
         .map_err(|e| format!("Mutex poisoned: {e}"))?;

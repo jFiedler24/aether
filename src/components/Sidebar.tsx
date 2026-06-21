@@ -62,15 +62,33 @@ const ConnectionsPanel: React.FC<ConnectionsPanelProps> = ({
 
   const handleHistoryConnect = (entry: HistoryEntry) => {
     const saved = profiles?.find((p) => p.id === entry.profileId);
+    const authType = entry.authType as "password" | "key" | "agent";
+
+    if (authType === "password" && !saved?.password) {
+      const profileForEdit: ConnectionProfile = {
+        id: entry.profileId,
+        name: entry.name,
+        host: entry.host,
+        port: entry.port,
+        username: entry.username,
+        authType,
+        color: entry.color,
+        password: "",
+        privateKeyPath: saved?.privateKeyPath ?? entry.privateKeyPath,
+      };
+      handleEditProfile(profileForEdit);
+      return;
+    }
+
     const profile: ConnectionProfile = {
       id: entry.profileId,
       name: entry.name,
       host: entry.host,
       port: entry.port,
       username: entry.username,
-      authType: entry.authType as "password" | "key" | "agent",
+      authType,
       color: entry.color,
-      password: saved?.password ?? entry.password,
+      password: saved?.password,
       privateKeyPath: saved?.privateKeyPath ?? entry.privateKeyPath,
     };
     const event = new CustomEvent("aether-quick-connect", { detail: profile });
